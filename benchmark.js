@@ -1,23 +1,54 @@
+
 'use strict';
 
 /**
- * Socket.IO load / smoke benchmark for game-online-draw-guess.
+ * Continuous Socket.IO stress test.
  *
  * Usage:
  * node benchmark.js [clients=50] [url=http://localhost:3000]
+ *   --duration=900
+ *   --report-interval=10
+ *   --stroke-interval=250
+ *   --chat-interval=5000
  */
 
 const { io } = require('socket.io-client');
 const { performance } = require('node:perf_hooks');
+const fs = require('node:fs');
+const path = require('node:path');
 
-const CLIENTS = Number(process.argv[2] || 50);
-const BASE_URL = (process.argv[3] || 'http://localhost:3000').replace(/\/$/, '');
+const args = process.argv.slice(2);
+const positional = args.filter((arg) => !arg.startsWith('--'));
 
-const ACK_TIMEOUT_MS = 10_000;
-const ROLE_TIMEOUT_MS = 8_000;
+const CLIENTS = Number(positional[0] || 50);
+const BASE_URL = (
+    positional[1] || 'http://localhost:3000'
+).replace(/\/$/, '');
 
-const STROKES_PER_ROOM = 20;
+function getOption(name, fallback) {
+    const prefix = `--${name}=`;
+    const arg = args.find((value) => value.startsWith(prefix));
+
+    if (!arg) return fallback;
+
+    const value = Number(arg.slice(prefix.length));
+
+    if (!Number.isFinite(value) || value <= 0) {
+        throw new Error(`Giá trị --${name} không hợp lệ.`);
+    }
+
+    return value;
+}
+
+const DURATION_SEC = getOption('duration', 60);
+const REPORT_INTERVAL_SEC = getOption('report-interval', 10);
+const STROKE_INTERVAL_MS = getOption('stroke-interval', 250);
+const CHAT_INTERVAL_MS = getOption('chat-interval', 5000);
+
+const ACK_TIMEOUT_MS = 10000;
+const ROLE_TIMEOUT_MS = 8000;
 const POINTS_PER_STROKE = 25;
+const POINTS_PER_CHUNK = 5;
 
 const sleep = (ms) =>
     new Promise((resolve) => setTimeout(resolve, ms));
@@ -27,7 +58,6 @@ if (!Number.isInteger(CLIENTS) || CLIENTS < 3) {
     process.exit(1);
 }
 
-// Gửi event và chờ server xác nhận ACK.
 function ack(socket, event, payload) {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -56,7 +86,6 @@ function ack(socket, event, payload) {
     });
 }
 
-// Tạo một client Socket.IO và chờ kết nối.
 function connectClient(index) {
     return new Promise((resolve, reject) => {
         const socket = io(BASE_URL, {
@@ -67,9 +96,7 @@ function connectClient(index) {
 
         const timer = setTimeout(() => {
             socket.disconnect();
-            reject(
-                new Error(`Client ${index} kết nối quá thời gian.`)
-            );
+            reject(new Error(`Client ${index} kết nối quá thời gian.`));
         }, ACK_TIMEOUT_MS);
 
         socket.once('connect', () => {
@@ -79,213 +106,258 @@ function connectClient(index) {
 
         socket.once('connect_error', (error) => {
             clearTimeout(timer);
-            reject(
-                new Error(`Client ${index}: ${error.message}`)
-            );
+            reject(new Error(`Client ${index}: ${error.message}`));
         });
     });
 }
 
-// Tính percentile.
 function percentile(values, p) {
     if (!values.length) return null;
 
     const sorted = [...values].sort((a, b) => a - b);
 
     return sorted[
-        Math.min(
-            sorted.length - 1,
-            Math.ceil(p * sorted.length) - 1
-        )
+        Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)
     ];
 }
 
-// In kết quả độ trễ.
-function printLatency(label, values) {
+function latencySummary(values) {
     if (!values.length) {
-        return console.log(`${label}: không có mẫu`);
+        return { n: 0, avg: null, p50: null, p95: null, p99: null, max: null };
     }
 
-    const avg =
-        values.reduce((sum, n) => sum + n, 0) / values.length;
+    return {
+        n: values.length,
+        avg: values.reduce((sum, value) => sum + value, 0) / values.length,
+        p50: percentile(values, 0.50),
+        p95: percentile(values, 0.95),
+        p99: percentile(values, 0.99),
+        max: Math.max(...values),
+    };
+}
 
-    console.log(
-        `${label}: n=${values.length}, ` +
-        `avg=${avg.toFixed(2)} ms, ` +
-        `p50=${percentile(values, 0.5).toFixed(2)} ms, ` +
-        `p95=${percentile(values, 0.95).toFixed(2)} ms, ` +
-        `max=${Math.max(...values).toFixed(2)} ms`
+function formatLatency(label, values) {
+    const s = latencySummary(values);
+
+    if (!s.n) return `${label}: chưa có mẫu`;
+
+    return (
+        `${label}: n=${s.n}, avg=${s.avg.toFixed(2)} ms, ` +
+        `p50=${s.p50.toFixed(2)} ms, ` +
+        `p95=${s.p95.toFixed(2)} ms, ` +
+        `p99=${s.p99.toFixed(2)} ms, ` +
+        `max=${s.max.toFixed(2)} ms`
     );
 }
 
 async function main() {
-    const startedAt = performance.now();
-
     const sockets = [];
     const rooms = [];
-
     const connectLatencies = [];
-    const strokeStartLatencies = [];
+    const strokeLatencies = [];
+    const pendingStrokeStarts = new Map();
 
-    const sentAt = new Map();
+    const totals = {
+        strokeStartsSent: 0,
+        strokeStartsExpected: 0,
+        strokeStartsReceived: 0,
+        strokePointsSent: 0,
+        strokePointsExpected: 0,
+        strokePointsReceived: 0,
+        strokeEndsSent: 0,
+        strokeEndsExpected: 0,
+        strokeEndsReceived: 0,
+        chatsSent: 0,
+        chatsExpected: 0,
+        chatsReceived: 0,
+        disconnects: 0,
+        socketErrors: 0,
+    };
 
-    let receivedStrokeStarts = 0;
-    let receivedStrokePoints = 0;
-    let receivedStrokeEnds = 0;
-    let receivedChats = 0;
+    const windowCounts = {
+        strokeStartsSent: 0,
+        strokeStartsExpected: 0,
+        strokeStartsReceived: 0,
+        strokePointsSent: 0,
+        strokePointsExpected: 0,
+        strokePointsReceived: 0,
+        strokeEndsSent: 0,
+        strokeEndsExpected: 0,
+        strokeEndsReceived: 0,
+        chatsSent: 0,
+        chatsExpected: 0,
+        chatsReceived: 0,
+        disconnects: 0,
+        socketErrors: 0,
+    };
 
-    let expectedStrokeStarts = 0;
-    let expectedStrokePoints = 0;
-    let expectedStrokeEnds = 0;
-    let expectedChats = 0;
+    let shuttingDown = false;
+    let reportingTimer;
+    let deadlineTimer;
+
+    const startedAt = performance.now();
+    const deadline = startedAt + DURATION_SEC * 1000;
+
+    function increment(name, amount = 1) {
+        totals[name] += amount;
+        windowCounts[name] += amount;
+    }
+
+    function printWindowReport() {
+        const elapsed = (performance.now() - startedAt) / 1000;
+        const connected = sockets.filter((socket) => socket.connected).length;
+
+        const expected =
+            windowCounts.strokeStartsExpected +
+            windowCounts.strokePointsExpected +
+            windowCounts.strokeEndsExpected +
+            windowCounts.chatsExpected;
+
+        const received =
+            windowCounts.strokeStartsReceived +
+            windowCounts.strokePointsReceived +
+            windowCounts.strokeEndsReceived +
+            windowCounts.chatsReceived;
+
+        const delivery = expected > 0
+            ? `${((received / expected) * 100).toFixed(2)}%`
+            : 'chưa có mẫu';
+
+        console.log(
+            `[${elapsed.toFixed(0)}s] ` +
+            `connected=${connected}/${CLIENTS} | ` +
+            `stroke-start=${windowCounts.strokeStartsReceived}/` +
+            `${windowCounts.strokeStartsExpected} | ` +
+            `points=${windowCounts.strokePointsReceived}/` +
+            `${windowCounts.strokePointsExpected} | ` +
+            `end=${windowCounts.strokeEndsReceived}/` +
+            `${windowCounts.strokeEndsExpected} | ` +
+            `chat=${windowCounts.chatsReceived}/` +
+            `${windowCounts.chatsExpected} | ` +
+            `delivery=${delivery} | ` +
+            `disconnects=+${windowCounts.disconnects} | ` +
+            `errors=+${windowCounts.socketErrors}`
+        );
+
+        for (const key of Object.keys(windowCounts)) {
+            windowCounts[key] = 0;
+        }
+    }
 
     try {
+        console.log('========== CONTINUOUS STRESS TEST ==========');
         console.log(`Server: ${BASE_URL}`);
-        console.log(`Số client: ${CLIENTS}`);
+        console.log(`Clients: ${CLIENTS}`);
+        console.log(`Duration: ${DURATION_SEC} seconds`);
+        console.log(`Report interval: ${REPORT_INTERVAL_SEC} seconds`);
+        console.log(`Stroke interval per room: ${STROKE_INTERVAL_MS} ms`);
+        console.log(`Chat interval per room: ${CHAT_INTERVAL_MS} ms`);
 
-        // 1. Kiểm tra server có hoạt động không.
         const health = await fetch(`${BASE_URL}/health`);
 
         if (!health.ok) {
             throw new Error(`/health trả HTTP ${health.status}`);
         }
 
-        console.log(
-            `Health check: ${JSON.stringify(await health.json())}`
-        );
+        console.log(`Health check: ${JSON.stringify(await health.json())}`);
 
-        // 2. Chia client thành các phòng từ 3 đến 10 người.
         const groupSizes = [];
-
         let remaining = CLIENTS;
 
         while (remaining > 0) {
             const size = Math.min(10, remaining);
-
             groupSizes.push(size);
             remaining -= size;
         }
 
-        // Nếu phòng cuối có 1 hoặc 2 người,
-        // chuyển bớt người từ phòng trước sang.
-        if (
-            groupSizes.length > 1 &&
-            groupSizes.at(-1) < 3
-        ) {
+        if (groupSizes.length > 1 && groupSizes.at(-1) < 3) {
             const move = 3 - groupSizes.at(-1);
-
             groupSizes[groupSizes.length - 2] -= move;
             groupSizes[groupSizes.length - 1] += move;
         }
 
-        if (
-            groupSizes.some((n) => n < 3 || n > 10)
-        ) {
-            throw new Error(
-                'Không thể chia client thành phòng hợp lệ (3–10 người/phòng).'
-            );
+        if (groupSizes.some((size) => size < 3 || size > 10)) {
+            throw new Error('Không thể chia client thành phòng hợp lệ (3–10 người/phòng).');
         }
 
         console.log(
-            `Số phòng: ${groupSizes.length}; ` +
-            `quy mô: ${groupSizes.join(', ')}`
+            `Rooms: ${groupSizes.length}; sizes: ${groupSizes.join(', ')}`
         );
 
-        // 3. Kết nối tất cả client.
         const connectStart = performance.now();
 
         const connected = await Promise.all(
-            Array.from({ length: CLIENTS }, async (_, i) => {
+            Array.from({ length: CLIENTS }, async (_, index) => {
                 const t0 = performance.now();
-
-                const socket = await connectClient(i + 1);
-
-                connectLatencies.push(
-                    performance.now() - t0
-                );
-
+                const socket = await connectClient(index + 1);
+                connectLatencies.push(performance.now() - t0);
                 sockets.push(socket);
-
                 return socket;
             })
         );
 
         console.log(
-            `Đã kết nối ${connected.length}/${CLIENTS} client ` +
-            `trong ${(performance.now() - connectStart).toFixed(2)} ms.`
+            `Connected ${connected.length}/${CLIENTS} in ` +
+            `${(performance.now() - connectStart).toFixed(2)} ms.`
         );
 
-        // 4. Đăng ký listener để đếm event nhận được.
         for (const socket of sockets) {
             socket.on('draw:stroke-start', (stroke) => {
-                receivedStrokeStarts++;
+                increment('strokeStartsReceived');
 
-                const t0 = sentAt.get(stroke?.id);
+                const sentAt = pendingStrokeStarts.get(stroke?.id);
 
-                if (t0 !== undefined) {
-                    strokeStartLatencies.push(
-                        performance.now() - t0
-                    );
+                if (sentAt !== undefined) {
+                    strokeLatencies.push(performance.now() - sentAt);
                 }
             });
 
             socket.on('draw:stroke-points', () => {
-                receivedStrokePoints++;
+                increment('strokePointsReceived');
             });
 
             socket.on('draw:stroke-end', () => {
-                receivedStrokeEnds++;
+                increment('strokeEndsReceived');
             });
 
             socket.on('tin_nhan_tu_server', (message) => {
                 if (message?.loai === 'chat') {
-                    receivedChats++;
+                    increment('chatsReceived');
                 }
+            });
+
+            socket.on('disconnect', () => {
+                if (!shuttingDown) increment('disconnects');
+            });
+
+            socket.on('connect_error', () => {
+                if (!shuttingDown) increment('socketErrors');
+            });
+
+            socket.on('error', () => {
+                if (!shuttingDown) increment('socketErrors');
             });
         }
 
-        // 5. Tạo phòng và cho các client tham gia.
         let offset = 0;
 
-        for (
-            let ri = 0;
-            ri < groupSizes.length;
-            ri++
-        ) {
-            const group = connected.slice(
-                offset,
-                offset + groupSizes[ri]
-            );
-
+        for (let ri = 0; ri < groupSizes.length; ri++) {
+            const group = connected.slice(offset, offset + groupSizes[ri]);
             offset += groupSizes[ri];
 
-            // Client đầu tiên tạo phòng.
-            const created = await ack(
-                group[0],
-                'tao_phong',
-                {
-                    tenNguoiChon: `Bench-${ri + 1}-1`,
-                    thoiGianPhut: 1,
-                    soNguoiToiDa: group.length,
-                }
-            );
+            const created = await ack(group[0], 'tao_phong', {
+                tenNguoiChon: `Stress-${ri + 1}-1`,
+                thoiGianPhut: Math.max(1, Math.ceil(DURATION_SEC / 60) + 1),
+                soNguoiToiDa: group.length,
+            });
 
             const roomId = created.phong.idPhong;
 
-            // Các client còn lại tham gia phòng.
-            for (
-                let pi = 1;
-                pi < group.length;
-                pi++
-            ) {
-                await ack(
-                    group[pi],
-                    'tham_gia_phong',
-                    {
-                        idPhong: roomId,
-                        tenNguoiChon: `Bench-${ri + 1}-${pi + 1}`,
-                    }
-                );
+            for (let pi = 1; pi < group.length; pi++) {
+                await ack(group[pi], 'tham_gia_phong', {
+                    idPhong: roomId,
+                    tenNguoiChon: `Stress-${ri + 1}-${pi + 1}`,
+                });
             }
 
             rooms.push({
@@ -294,270 +366,237 @@ async function main() {
                 host: group[0],
             });
 
-            console.log(
-                `Phòng ${ri + 1}: ${roomId}, ${group.length} người.`
-            );
+            console.log(`Room ${ri + 1}: ${roomId}, ${group.length} players.`);
         }
 
-        // 6. Đăng ký listener vai trò người vẽ trước khi bắt đầu.
-        const drawerPromises = rooms.map(
-            ({ sockets: group }, ri) =>
-                new Promise((resolve, reject) => {
-                    let settled = false;
+        const drawerPromises = rooms.map(({ sockets: group }, roomIndex) =>
+            new Promise((resolve, reject) => {
+                let settled = false;
+                const listeners = [];
 
-                    const listeners = [];
+                const timer = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
 
-                    const timer = setTimeout(() => {
-                        if (settled) return;
+                    for (const [socket, listener] of listeners) {
+                        socket.off('chuyen_luot_ve', listener);
+                    }
+
+                    reject(
+                        new Error(
+                            `Không nhận được vai trò người vẽ ở phòng ${roomIndex + 1}.`
+                        )
+                    );
+                }, ROLE_TIMEOUT_MS);
+
+                for (const socket of group) {
+                    const listener = (data) => {
+                        if (settled || data?.vaiTro !== 'nguoi_ve') return;
 
                         settled = true;
+                        clearTimeout(timer);
 
-                        for (const [socket, fn] of listeners) {
-                            socket.off('chuyen_luot_ve', fn);
+                        for (const [s, fn] of listeners) {
+                            s.off('chuyen_luot_ve', fn);
                         }
 
-                        reject(
-                            new Error(
-                                `Không nhận được vai trò người vẽ ở phòng ${ri + 1}.`
-                            )
-                        );
-                    }, ROLE_TIMEOUT_MS);
+                        resolve(socket);
+                    };
 
-                    for (const socket of group) {
-                        const fn = (data) => {
-                            if (
-                                settled ||
-                                data?.vaiTro !== 'nguoi_ve'
-                            ) {
-                                return;
-                            }
-
-                            settled = true;
-
-                            clearTimeout(timer);
-
-                            for (
-                                const [s, listener] of listeners
-                            ) {
-                                s.off('chuyen_luot_ve', listener);
-                            }
-
-                            resolve(socket);
-                        };
-
-                        listeners.push([socket, fn]);
-
-                        socket.on('chuyen_luot_ve', fn);
-                    }
-                })
+                    listeners.push([socket, listener]);
+                    socket.on('chuyen_luot_ve', listener);
+                }
+            })
         );
 
-        // 7. Bắt đầu trận đấu ở tất cả các phòng.
         for (const room of rooms) {
-            await ack(
-                room.host,
-                'bat_dau_tran_dau'
-            );
+            await ack(room.host, 'bat_dau_tran_dau');
         }
 
-        // Chờ xác định người vẽ ở từng phòng.
         const drawers = await Promise.all(drawerPromises);
 
-        console.log(
-            `Đã bắt đầu ${rooms.length} trận; ` +
-            `mỗi phòng đã xác định được người vẽ.`
+        console.log(`Started ${rooms.length} matches.`);
+        console.log('Starting continuous drawing/chat workload...');
+
+        reportingTimer = setInterval(
+            printWindowReport,
+            REPORT_INTERVAL_SEC * 1000
         );
 
-        // 8. Kiểm tra truyền dữ liệu vẽ.
-        for (
-            let ri = 0;
-            ri < rooms.length;
-            ri++
-        ) {
-            const room = rooms[ri];
-            const drawer = drawers[ri];
+        deadlineTimer = setTimeout(() => {
+            shuttingDown = true;
+        }, DURATION_SEC * 1000);
 
-            // Người vẽ không nhận lại dữ liệu vẽ của chính mình.
+        const workers = rooms.map(async (room, roomIndex) => {
+            const drawer = drawers[roomIndex];
             const receivers = room.sockets.length - 1;
+            let strokeSequence = 0;
+            let lastChatAt = performance.now();
 
-            for (
-                let si = 0;
-                si < STROKES_PER_ROOM;
-                si++
-            ) {
-                const id =
-                    `bench-${ri}-${si}-${Date.now()}`;
+            while (!shuttingDown && performance.now() < deadline) {
+                if (!drawer.connected) {
+                    await sleep(250);
+                    continue;
+                }
 
-                // Tạo 25 điểm tọa độ chuẩn hóa từ 0 đến 1.
+                const now = performance.now();
+
+                // Send a chat periodically from the drawer.
+                if (now - lastChatAt >= CHAT_INTERVAL_MS) {
+                    drawer.emit('tin_nhan_chat', {
+                        noiDungChat: `Stress test room ${roomIndex + 1} ` +
+                            `${Math.floor((now - startedAt) / 1000)}s`,
+                    });
+
+                    increment('chatsSent');
+                    increment('chatsExpected', room.sockets.length);
+                    lastChatAt = now;
+                }
+
+                const id = `stress-${roomIndex}-${strokeSequence++}-${Date.now()}`;
+
                 const points = Array.from(
                     { length: POINTS_PER_STROKE },
                     (_, i) => ({
                         x: i / (POINTS_PER_STROKE - 1),
-                        y:
-                            ((i + si) % POINTS_PER_STROKE) /
+                        y: ((i + strokeSequence) % POINTS_PER_STROKE) /
                             (POINTS_PER_STROKE - 1),
                     })
                 );
 
-                const stroke = {
+                pendingStrokeStarts.set(id, performance.now());
+
+                // Keep the latency map bounded during long runs.
+                if (pendingStrokeStarts.size > 50000) {
+                    const oldest = pendingStrokeStarts.keys().next().value;
+                    pendingStrokeStarts.delete(oldest);
+                }
+
+                drawer.emit('draw:stroke-start', {
                     id,
                     tool: 'brush',
                     color: '#1f2937',
                     size: 0.006,
                     points: [points[0]],
-                };
+                });
 
-                sentAt.set(id, performance.now());
+                increment('strokeStartsSent');
+                increment('strokeStartsExpected', receivers);
 
-                // Gửi sự kiện bắt đầu nét vẽ.
-                drawer.emit(
-                    'draw:stroke-start',
-                    stroke
-                );
+                for (let i = 1; i < points.length; i += POINTS_PER_CHUNK) {
+                    drawer.emit('draw:stroke-points', {
+                        id,
+                        points: points.slice(i, i + POINTS_PER_CHUNK),
+                    });
 
-                expectedStrokeStarts += receivers;
-
-                // Gửi các điểm còn lại thành từng nhóm 5 điểm.
-                for (
-                    let i = 1;
-                    i < points.length;
-                    i += 5
-                ) {
-                    drawer.emit(
-                        'draw:stroke-points',
-                        {
-                            id,
-                            points: points.slice(i, i + 5),
-                        }
-                    );
-
-                    expectedStrokePoints += receivers;
+                    increment('strokePointsSent');
+                    increment('strokePointsExpected', receivers);
                 }
 
-                // Kết thúc nét vẽ.
-                drawer.emit(
-                    'draw:stroke-end',
-                    { id }
-                );
+                drawer.emit('draw:stroke-end', { id });
 
-                expectedStrokeEnds += receivers;
+                increment('strokeEndsSent');
+                increment('strokeEndsExpected', receivers);
 
-                await sleep(15);
+                await sleep(STROKE_INTERVAL_MS);
             }
+        });
 
-            // 9. Kiểm tra chức năng chat.
-            drawer.emit(
-                'tin_nhan_chat',
-                {
-                    noiDungChat:
-                        `Benchmark chat phòng ${ri + 1}`,
-                }
-            );
+        await Promise.all(workers);
 
-            // Chat được gửi đến toàn bộ thành viên,
-            // bao gồm cả người gửi.
-            expectedChats += room.sockets.length;
-        }
+        // Allow buffered network events a short time to arrive.
+        await sleep(2000);
 
-        // Chờ các event được truyền và nhận.
-        await sleep(1500);
+        shuttingDown = true;
 
-        // 10. In kết quả.
-        console.log('\n========== KẾT QUẢ BENCHMARK ==========');
+        if (reportingTimer) clearInterval(reportingTimer);
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+
+        console.log('\n========== FINAL STRESS TEST REPORT ==========');
+        console.log(
+            `Elapsed: ${((performance.now() - startedAt) / 1000).toFixed(2)} seconds`
+        );
+        console.log(
+            `Connected at end: ${sockets.filter((socket) => socket.connected).length}/${CLIENTS}`
+        );
+        console.log(`Rooms: ${rooms.length}`);
 
         console.log(
-            `Tổng thời gian: ` +
-            `${(performance.now() - startedAt).toFixed(2)} ms`
+            `Stroke-start received: ${totals.strokeStartsReceived}/` +
+            `${totals.strokeStartsExpected}`
         );
-
         console.log(
-            `Client kết nối: ` +
-            `${sockets.filter((s) => s.connected).length}/${CLIENTS}`
+            `Stroke-points received: ${totals.strokePointsReceived}/` +
+            `${totals.strokePointsExpected}`
         );
-
-        console.log(`Phòng được tạo: ${rooms.length}`);
-
         console.log(
-            `Sự kiện stroke-start: ` +
-            `${receivedStrokeStarts}/${expectedStrokeStarts}`
+            `Stroke-end received: ${totals.strokeEndsReceived}/` +
+            `${totals.strokeEndsExpected}`
         );
-
         console.log(
-            `Sự kiện stroke-points: ` +
-            `${receivedStrokePoints}/${expectedStrokePoints}`
+            `Chat received: ${totals.chatsReceived}/${totals.chatsExpected}`
         );
+        console.log(`Unexpected disconnects: ${totals.disconnects}`);
+        console.log(`Socket errors: ${totals.socketErrors}`);
 
-        console.log(
-            `Sự kiện stroke-end: ` +
-            `${receivedStrokeEnds}/${expectedStrokeEnds}`
-        );
+        console.log(formatLatency('Connection latency', connectLatencies));
+        console.log(formatLatency('Stroke-start latency', strokeLatencies));
 
-        console.log(
-            `Tin nhắn chat: ` +
-            `${receivedChats}/${expectedChats}`
-        );
-
-        printLatency(
-            'Kết nối',
-            connectLatencies
-        );
-
-        printLatency(
-            'Độ trễ stroke-start',
-            strokeStartLatencies
-        );
-
-        // Tính tỷ lệ nhận event tổng hợp.
         const expected =
-            expectedStrokeStarts +
-            expectedStrokePoints +
-            expectedStrokeEnds +
-            expectedChats;
+            totals.strokeStartsExpected +
+            totals.strokePointsExpected +
+            totals.strokeEndsExpected +
+            totals.chatsExpected;
 
         const received =
-            receivedStrokeStarts +
-            receivedStrokePoints +
-            receivedStrokeEnds +
-            receivedChats;
+            totals.strokeStartsReceived +
+            totals.strokePointsReceived +
+            totals.strokeEndsReceived +
+            totals.chatsReceived;
 
-        const rate =
-            expected
-                ? (received / expected) * 100
-                : 0;
+        const deliveryRate = expected > 0 ? (received / expected) * 100 : 0;
 
-        console.log(
-            `Tỷ lệ nhận sự kiện tổng hợp: ${rate.toFixed(2)}%`
+        console.log(`Aggregate event delivery: ${deliveryRate.toFixed(2)}%`);
+
+        const report = {
+            server: BASE_URL,
+            clients: CLIENTS,
+            durationSeconds: DURATION_SEC,
+            reportIntervalSeconds: REPORT_INTERVAL_SEC,
+            strokeIntervalMs: STROKE_INTERVAL_MS,
+            chatIntervalMs: CHAT_INTERVAL_MS,
+            elapsedSeconds: (performance.now() - startedAt) / 1000,
+            connectedAtEnd: sockets.filter((socket) => socket.connected).length,
+            roomCount: rooms.length,
+            totals,
+            connectionLatency: latencySummary(connectLatencies),
+            strokeStartLatency: latencySummary(strokeLatencies),
+            aggregateDeliveryRate: deliveryRate,
+        };
+
+        const reportPath = path.resolve(
+            `stress-report-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
         );
 
-        console.log(
-            'Độ trễ được đo cho stroke-start; ' +
-            'points/end chỉ thống kê tỷ lệ nhận.'
-        );
+        fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+        console.log(`JSON report saved: ${reportPath}`);
 
-        console.log(
-            'Lưu ý: đây là benchmark tải cơ bản, ' +
-            'chưa phải kiểm thử 50 người thao tác liên tục trong thời gian dài.'
-        );
-
-        if (rate < 99) {
+        if (deliveryRate < 99 || totals.disconnects > 0 || totals.socketErrors > 0) {
             process.exitCode = 2;
         }
-
     } finally {
-        // Ngắt kết nối tất cả client sau khi kiểm thử.
+        shuttingDown = true;
+
+        if (reportingTimer) clearInterval(reportingTimer);
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+
         for (const socket of sockets) {
-            if (socket.connected) {
-                socket.disconnect();
-            }
+            if (socket.connected) socket.disconnect();
         }
     }
 }
 
 main().catch((error) => {
-    console.error(
-        '\nBenchmark thất bại:',
-        error.message
-    );
-
+    console.error('\nStress test failed:', error.stack || error.message);
     process.exitCode = 1;
 });
