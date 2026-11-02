@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="description" content="Game vẽ hình và đoán chữ.">
+  <title>Đoán Chữ Thần Tốc</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="bg-orb orb-a" aria-hidden="true"></div>
+  <div class="bg-orb orb-b" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">✏️</div>
+      <div>
+        <div class="brand-name">ĐOÁN CHỮ THẦN TỐC</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button class="ghost-btn" id="tutorialBtn" type="button">📘 Hướng dẫn</button>
+      <button class="ghost-btn icon-btn" id="themeBtn" type="button" title="Đổi sáng / tối">🌙</button>
+    </div>
+  </header>
+
+  <main class="app">
+    <!-- ================= TRANG 1: ĐĂNG NHẬP ================= -->
+    <section class="page" id="page1">
+      <div class="card hero-card">
+        <h1>Vẽ thật dễ hiểu.<br><span>Đoán thật nhanh.</span></h1>
+        <p class="hero-copy">Tạo phòng, rủ bạn bè và giành vị trí cao nhất trên bảng xếp hạng.</p>
+
+        <div class="field">
+          <label for="username">Tên của bạn</label>
+          <input type="text" id="username" placeholder="Ví dụ: Anh Đẹp Trai..." maxlength="30" autocomplete="off">
+          <div class="field-hint">Tên không được trùng với người chơi khác.</div>
+        </div>
+
+        <div class="field" id="roomCodeField" hidden>
+          <label for="roomCode">Mã phòng</label>
+          <input type="text" id="roomCode" placeholder="Nhập mã phòng gồm 6 số..." maxlength="6" inputmode="numeric" autocomplete="off">
+        </div>
+
+        <div class="hero-actions">
+          <button class="primary-btn" id="createBtn" type="button">➕ Tạo phòng</button>
+          <button class="secondary-btn" id="joinBtn" type="button">🚪 Vào phòng</button>
+        </div>
+        <div class="hero-foot">Cần tối thiểu 3 người và tối đa 10 người để bắt đầu.</div>
+      </div>
+    </section>
+
+    <!-- ================= TRANG 2: TẠO PHÒNG ================= -->
+    <section class="page" id="page2" hidden>
+      <div class="card create-card">
+        <button class="ghost-btn back-btn" id="backToHomeBtn" type="button">← Quay lại</button>
+        <div class="eyebrow">Thiết lập phòng</div>
+        <h2>Tạo phòng mới</h2>
+
+        <div class="room-code-display">
+          <span>Mã phòng của bạn</span>
+          <b id="generatedRoomId">------</b>
+          <small>Chia sẻ mã này để bạn bè tham gia</small>
+        </div>
+
+        <div class="setting-block">
+          <div class="setting-head">
+            <label for="timeSlider">Thời gian vẽ mỗi lượt</label>
+            <output id="timeVal">3 phút</output>
+          </div>
+          <input type="range" id="timeSlider" min="1" max="6" step="1" value="3">
+          <div class="range-ticks"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span></div>
+        </div>
+
+        <div class="setting-block">
+          <div class="setting-head">
+            <label for="maxPlayersSlider">Số người tối đa</label>
+            <output id="maxPlayersVal">6 người</output>
+          </div>
+          <input type="range" id="maxPlayersSlider" min="3" max="10" step="1" value="6">
+          <div class="range-ticks"><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
+          <div class="field-hint">Phòng chỉ bắt đầu được khi có tối thiểu 3 người chơi.</div>
+        </div>
+
+        <button class="primary-btn wide" id="finalCreateBtn" type="button">🚀 Bắt đầu tạo phòng</button>
+      </div>
+    </section>
+
+    <!-- ================= TRANG 3: PHÒNG CHỜ ================= -->
+    <section class="page" id="page3" hidden>
+      <div class="lobby-shell">
+        <div class="card lobby-head">
+          <div>
+            <div class="eyebrow">Phòng chờ</div>
+            <h2>Mã phòng <span class="room-code-inline" id="roomDisplayId">------</span></h2>
+          </div>
+          <div class="room-meta">
+            <span class="pill" id="roomMetaTime">⏱ 3 phút / lượt</span>
+            <span class="pill" id="roomMetaPlayers">👥 0/6 người</span>
+          </div>
+        </div>
+
+        <div class="lobby-grid">
+          <div class="card players-card">
+            <div class="panel-title">Người chơi <span class="muted" id="playerCountLabel"></span></div>
+            <div id="playerList" class="player-list"></div>
+            <div class="lobby-note">Chờ đủ 3 người để chủ phòng bắt đầu.</div>
+          </div>
+
+          <div class="card chat-card lobby-chat">
+            <div class="panel-title">Trò chuyện phòng chờ</div>
+            <div id="chatBox" class="chat-box"></div>
+            <div class="input-row">
+              <input type="text" id="chatInput" placeholder="Nhắn gì đó cho cả phòng..." maxlength="200" autocomplete="off">
+              <button class="primary-btn small" id="sendChatBtn" type="button">Gửi</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card lobby-actions">
+          <button class="danger-btn" id="leaveBtn" type="button">🚪 Rời phòng</button>
+          <button class="ghost-btn" id="shareBtn" type="button">🔗 Chia sẻ link</button>
+          <button class="primary-btn" id="startGameBtn" type="button">🎮 Bắt đầu chơi</button>
+        </div>
+
+        <div class="card host-settings" id="hostSettings" hidden>
+          <div class="panel-title">Chỉnh cài đặt phòng <span class="muted">chỉ chủ phòng</span></div>
+          <div class="host-settings-grid">
+            <div class="setting-block compact">
+              <div class="setting-head"><label for="hostTimeSlider">Thời gian vẽ</label><output id="hostTimeVal">3 phút</output></div>
+              <input type="range" id="hostTimeSlider" min="1" max="6" step="1" value="3">
+            </div>
+            <div class="setting-block compact">
+              <div class="setting-head"><label for="hostMaxPlayersSlider">Số người tối đa</label><output id="hostMaxPlayersVal">6 người</output></div>
+              <input type="range" id="hostMaxPlayersSlider" min="3" max="10" step="1" value="6">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= TRANG 4: ĐẤU TRƯỜNG ================= -->
+    <section class="page game-page" id="manHinhTranDau" hidden>
+      <div class="card game-topbar">
+        <div class="role-block">
+          <div id="vaiTroHienTai" class="role-text">Đang chờ...</div>
+          <div id="turnLabel" class="turn-label"></div>
+        </div>
+        <div class="word-wrap">
+          <div class="word-label">TỪ KHOÁ</div>
+          <div id="hienThiTuKhoa" class="word-display">...</div>
+        </div>
+        <div class="timer-block">
+          <div id="nhanDongHo" class="timer-label">THỜI GIAN</div>
+          <div id="dongHoDemNguoc" class="timer-value">--:--</div>
+        </div>
+      </div>
+
+      <div class="card score-strip">
+        <div class="score-title">BẢNG ĐIỂM</div>
+        <div id="bangDiemTran" class="score-list"></div>
+      </div>
+
+      <div class="game-main">
+        <div class="card canvas-wrap">
+          <iframe id="khungVe" src="/drawing/" title="Bảng vẽ"></iframe>
+          <div id="lopPhuLuot" class="turn-overlay" hidden></div>
+        </div>
+
+        <aside class="game-side">
+          <div class="card side-card chat-card game-chat">
+            <div class="panel-title">Chat trận đấu</div>
+            <div id="chatBoxTran" class="chat-box"></div>
+            <div class="input-row">
+              <input type="text" id="inputChat" placeholder="Trò chuyện với mọi người..." maxlength="200" autocomplete="off">
+              <button class="primary-btn small" id="btnGuiChat" type="button">Gửi</button>
+            </div>
+          </div>
+
+          <div class="card side-card guess-card">
+            <div class="panel-title">Đoán từ khoá</div>
+            <div id="guessStatus" class="guess-status">Quan sát hình vẽ và nhập đáp án.</div>
+            <div class="input-row">
+              <input type="text" id="inputDoan" placeholder="Nhập đáp án..." maxlength="200" autocomplete="off">
+              <button class="primary-btn small" id="btnGuiDoan" type="button">Đoán</button>
+            </div>
+          </div>
+
+          <div class="card side-card report-card">
+            <div class="panel-title">An toàn trận đấu</div>
+            <button class="danger-outline-btn" id="reportBtn" type="button">🚨 Tố cáo người chơi</button>
+            <div class="muted small" id="reportInfo"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ================= TRANG 5: KẾT QUẢ ================= -->
+    <section class="page" id="manHinhKetQua" hidden>
+      <div class="card result-card">
+        <div class="eyebrow">Tổng kết trận đấu</div>
+        <h2>🏆 Bảng xếp hạng</h2>
+        <div id="resultNote" class="result-note"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Hạng</th><th>Tên</th><th>Điểm</th><th>Vi phạm</th></tr></thead>
+            <tbody id="bangDiemChungCuocBody"></tbody>
+          </table>
+        </div>
+        <div class="result-actions">
+          <button class="danger-btn" id="btnTroVe" type="button">🚪 Rời</button>
+          <button class="primary-btn" id="btnChoiTiep" type="button">🔁 Tiếp tục</button>
+        </div>
+        <div id="ghiChuChoiTiep" class="muted small"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= MODAL: HƯỚNG DẪN ================= -->
+  <div class="modal" id="tutorialModal" hidden>
+    <div class="modal-backdrop" data-close="tutorial"></div>
+    <div class="modal-card tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle">
+      <div class="modal-head">
+        <h2 id="tutorialTitle">HƯỚNG DẪN CHƠI</h2>
+        <button class="ghost-btn icon-btn" data-close="tutorial" type="button">✕</button>
+      </div>
+      <div class="tutorial-body">
+        <p>Chào mừng bạn đến với trò chơi <b>Vẽ và Đoán</b>!</p>
+        <p>Mục tiêu rất đơn giản: một người nhận từ khoá và vẽ hình minh hoạ, những người còn lại cố gắng đoán chính xác từ khoá đó. Hãy vẽ thật dễ hiểu, đoán thật nhanh và tích luỹ điểm để giành vị trí cao nhất trên bảng xếp hạng!</p>
+
+        <h3>1. Bắt đầu trò chơi</h3>
+        <ul>
+          <li>Mỗi phòng cần tối thiểu <b>3 người</b> và tối đa <b>10 người</b> để bắt đầu trận đấu.</li>
+          <li>Người tạo phòng sẽ là Host (chủ phòng), có quyền bắt đầu trận và thiết lập thời gian vẽ.</li>
+          <li>Nếu Host rời phòng, quyền Host sẽ được tự động chuyển cho một người chơi ngẫu nhiên còn lại.</li>
+          <li>Mỗi người chơi sẽ có đúng một lượt vẽ trong trận đấu.</li>
+        </ul>
+
+        <h3>2. Cách chơi một lượt</h3>
+        <p><b>Đối với người vẽ:</b></p>
+        <ul>
+          <li>Bạn nhận được một từ khoá bí mật.</li>
+          <li>Dùng công cụ vẽ để minh hoạ từ khoá lên bảng vẽ.</li>
+          <li>Không được viết trực tiếp từ khoá hoặc cố tình tiết lộ đáp án bằng nội dung chat.</li>
+          <li>Chỉ người đang được phân công mới có quyền vẽ.</li>
+        </ul>
+        <p><b>Đối với người đoán:</b></p>
+        <ul>
+          <li>Quan sát hình vẽ và nhập đáp án vào ô nhập từ khoá riêng.</li>
+          <li>Đáp án <b>phân biệt dấu tiếng Việt</b>: với từ khoá “cái gương”, nhập “cai guong” hoặc “cài gượng” đều bị tính là <b>sai</b>. Chỉ không phân biệt hoa/thường và khoảng trắng thừa.</li>
+          <li>Người đoán đúng sẽ được thông báo đã đoán chính xác.</li>
+          <li>Đáp án bí mật sẽ không được công khai chỉ vì có người đoán đúng.</li>
+        </ul>
+
+        <h3>3. Thời gian vẽ và thời gian bonus</h3>
+        <ul>
+          <li>Host có thể thiết lập thời gian vẽ từ <b>1 đến 6 phút</b>, mỗi lần tăng 1 phút.</li>
+          <li>Khi hết thời gian vẽ, người vẽ không thể tiếp tục thao tác trên bảng vẽ.</li>
+          <li>Những người chưa đoán đúng có thêm <b>60 giây bonus</b> để tiếp tục đoán.</li>
+          <li>Khi hết thời gian bonus, lượt chơi kết thúc và chuyển sang lượt tiếp theo.</li>
+        </ul>
+
+        <h3>4. Gợi ý từ khoá</h3>
+        <ul>
+          <li>Cứ mỗi <b>20 giây</b>, hệ thống tiết lộ ngẫu nhiên một chữ cái trong từ khoá.</li>
+          <li>Vị trí chữ cái được chọn ngẫu nhiên; khoảng trắng không được tính.</li>
+          <li>Tổng số chữ cái được tiết lộ không vượt quá một nửa tổng số chữ cái. Nếu lẻ, lấy phần nguyên.</li>
+          <li>Ví dụ: “con mèo” có 6 chữ cái nên tối đa 3 chữ cái được gợi ý.</li>
+        </ul>
+
+        <h3>5. Chat và nhập đáp án</h3>
+        <ul>
+          <li><b>Chat</b> dùng để trò chuyện. Lịch sử chat phòng chờ và trong trận được tách biệt.</li>
+          <li>Khi trận bắt đầu, nội dung chat trước đó trong phòng chờ không xuất hiện trong khung chat trận đấu.</li>
+          <li>Nếu tin nhắn có chứa từ khoá bí mật, hệ thống tự động che phần nội dung trùng với đáp án bằng dấu <b>*</b>.</li>
+          <li><b>Nhập đáp án</b> dùng ô riêng, không nhập câu trả lời vào khung chat.</li>
+          <li>Đoán đúng: hệ thống thông báo bạn đã đoán chính xác. Đoán sai: chờ <b>10 giây</b> mới được nhập tiếp.</li>
+        </ul>
+
+        <h3>6. Cách tính điểm (thang 0–10 mỗi lượt)</h3>
+        <p><b>Điểm người đoán:</b></p>
+        <p class="formula">P = 10 × (1 − t / T) × (1 − 0.2 × (r − 1) / (G − 1))</p>
+        <ul>
+          <li><b>T</b>: tổng thời gian lượt chơi (thời gian vẽ + thời gian đoán bonus).</li>
+          <li><b>t</b>: thời gian đã trôi qua tại thời điểm server nhận đáp án đúng.</li>
+          <li><b>r</b>: thứ hạng trả lời đúng (1 là người đầu tiên).</li>
+          <li><b>G</b>: tổng số người có quyền đoán (chốt ngay khi lượt bắt đầu).</li>
+          <li>Trả lời càng sớm và thứ hạng càng cao thì điểm càng lớn.</li>
+        </ul>
+        <p><b>Điểm người vẽ:</b></p>
+        <p class="formula">D = (10 / G) × Σ<sub>i=1..C</sub> (1 − tᵢ / T)</p>
+        <ul>
+          <li><b>C</b>: số người đoán đúng; <b>tᵢ</b> là thời điểm người thứ i đoán đúng.</li>
+          <li>Càng nhiều người đoán đúng và đoán càng sớm thì người vẽ càng được nhiều điểm.</li>
+        </ul>
+        <ul>
+          <li>Điểm lưu dưới dạng <b>số thập phân</b> (làm tròn 2 chữ số), tối đa 10 và tối thiểu 0 cho mỗi lượt.</li>
+          <li>Trả lời sai: 0 điểm, không bị trừ điểm. Không ai đoán đúng: người vẽ nhận 0 điểm.</li>
+          <li>Phân loại điểm mỗi lượt: <b>0 – dưới 3.5</b> Thấp · <b>3.5 – dưới 7</b> Trung bình · <b>7 – 10</b> Cao.</li>
+        </ul>
+
+        <h3>7. Thứ tự lượt chơi và kết thúc trận</h3>
+        <ul>
+          <li>Thứ tự người chơi được chọn ngẫu nhiên khi bắt đầu trận.</li>
+          <li>Mỗi người chỉ có một lượt làm người vẽ trong một trận.</li>
+          <li>Khi tất cả người chơi đã hoàn thành lượt vẽ, trận đấu kết thúc và hiển thị bảng xếp hạng.</li>
+          <li>Nếu nhiều người có cùng tổng điểm, họ sẽ được xếp đồng hạng.</li>
+        </ul>
+
+        <h3>8. Từ khoá đã sử dụng</h3>
+        <ul>
+          <li>Một từ khoá đã được sử dụng sẽ không xuất hiện lại trong những lượt tiếp theo của cùng trận đấu.</li>
+        </ul>
+
+        <h3>9. Tố cáo người chơi</h3>
+        <ul>
+          <li>Số lượt tố cáo được giới hạn chung cho toàn bộ phòng, không phải mỗi người có một số lượt riêng.</li>
+          <li>Giới hạn: <b>L = max(2, floor(N/2))</b>, với N là số người chơi khi bắt đầu trận.</li>
+          <li>Bình chọn kéo dài 20 giây; cần tối thiểu 2 phiếu và ít nhất 2/3 số phiếu hợp lệ đồng ý.</li>
+          <li>Mức phạt khi tố cáo thành công: 15% / 25% / 40% điểm hiện có; lần thứ 4 bị loại khỏi phòng.</li>
+          <li>Hãy sử dụng đúng mục đích, tránh tố cáo tuỳ tiện hoặc lặp lại không cần thiết.</li>
+        </ul>
+
+        <p class="tutorial-end"><b>Chúc bạn có những phút giây vui vẻ và chúc may mắn!</b></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: TỐ CÁO ================= -->
+  <div class="modal" id="reportModal" hidden>
+    <div class="modal-backdrop" data-close="report"></div>
+    <div class="modal-card report-modal" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
+      <div class="modal-head">
+        <h2 id="reportTitle">🚨 Tố cáo người chơi</h2>
+        <button class="ghost-btn icon-btn" data-close="report" type="button">✕</button>
+      </div>
+      <p class="muted">Chọn người chơi và lý do. Cả phòng sẽ bình chọn trong 20 giây.</p>
+      <div class="field">
+        <label for="reportTarget">Người bị tố cáo</label>
+        <select id="reportTarget"></select>
+      </div>
+      <div class="field">
+        <label for="reportReason">Lý do</label>
+        <select id="reportReason">
+          <option value="tiet_lo_dap_an">Tiết lộ đáp án</option>
+          <option value="thong_dong">Thông đồng</option>
+          <option value="pha_hoai">Phá hoại trận đấu</option>
+          <option value="gian_lan_diem">Gian lận tính điểm</option>
+          <option value="hanh_vi_khong_phu_hop">Hành vi không phù hợp</option>
+        </select>
+      </div>
+      <div id="reportModalInfo" class="muted small"></div>
+      <div class="modal-actions">
+        <button class="ghost-btn" data-close="report" type="button">Huỷ</button>
+        <button class="danger-btn" id="submitReportBtn" type="button">Gửi tố cáo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: BÌNH CHỌN ================= -->
+  <div class="modal" id="voteModal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-card vote-modal" role="dialog" aria-modal="true" aria-labelledby="voteTitle">
+      <div class="modal-head">
+        <h2 id="voteTitle">⚖️ Bình chọn tố cáo</h2>
+        <span class="pill" id="voteCountdown">20s</span>
+      </div>
+      <div id="voteBody" class="vote-body"></div>
+      <div class="vote-meter"><div id="voteYesBar"></div><div id="voteNoBar"></div></div>
+      <div class="vote-counts"><span id="voteYes">Đồng ý: 0</span><span id="voteNo">Không đồng ý: 0</span></div>
+      <div class="modal-actions" id="voteActions">
+        <button class="danger-btn" id="voteYesBtn" type="button">Đồng ý tố cáo</button>
+        <button class="ghost-btn" id="voteNoBtn" type="button">Không đồng ý</button>
+      </div>
+      <div id="voteNote" class="muted small"></div>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/client.js" defer></script>
+</body>
+</html>

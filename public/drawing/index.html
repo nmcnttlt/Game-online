@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f172a">
+  <title>Bảng vẽ — Đoán Chữ Thần Tốc</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <main class="layout">
+      <aside class="sidebar" aria-label="Bảng công cụ">
+        <section class="section-block">
+          <div class="section-heading"><span>CÔNG CỤ</span><span class="section-caption">01</span></div>
+          <div class="tool-grid" role="group" aria-label="Chọn công cụ vẽ">
+            <button class="tool-btn active" type="button" data-tool="brush" aria-pressed="true" title="Bút (B)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16.8 9.9-9.9 4.2 4.2-9.9 9.9L4 22l.8-5.2Z"/><path d="m12.5 8.3 4.2 4.2M14.5 6.3l2.1-2.1a2 2 0 0 1 2.8 0l.4.4a2 2 0 0 1 0 2.8l-2.1 2.1"/></svg>
+              <span>Bút</span><kbd>B</kbd>
+            </button>
+            <button class="tool-btn" type="button" data-tool="eraser" aria-pressed="false" title="Tẩy (E)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7.4 4.9 11.7 11.7a2 2 0 0 1 0 2.8l-1.1 1.1H9L3.7 15.2a2 2 0 0 1 0-2.8l3.7-7.5Z"/><path d="m7.4 4.9 8.3 8.3M9 20.5l6.7-7.3"/></svg>
+              <span>Tẩy</span><kbd>E</kbd>
+            </button>
+            <button class="tool-btn" type="button" data-tool="eyedropper" aria-pressed="false" title="Hút màu (I)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5.5 4 4M5 19l3.8-.7 10.1-10.1a2.8 2.8 0 0 0-4-4L4.8 14.3 5 19Z"/><path d="m8.2 18.3-2.5-2.5"/></svg>
+              <span>Hút màu</span><kbd>I</kbd>
+            </button>
+          </div>
+          <p class="tool-hint" id="toolHint">Nhấn giữ và kéo chuột để vẽ.</p>
+        </section>
+
+        <section class="section-block">
+          <div class="section-heading"><span>LỊCH SỬ</span><span class="section-caption">02</span></div>
+          <div class="history-grid">
+            <button id="undoButton" class="history-btn" type="button" title="Hoàn tác">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4 12l5 5"/><path d="M4 12h9a6 6 0 0 1 6 6v1"/></svg>
+              <span>Hoàn tác</span>
+            </button>
+            <button id="redoButton" class="history-btn" type="button" title="Làm lại (Ctrl+Y)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5"/><path d="M20 12h-9a6 6 0 0 0-6 6v1"/></svg>
+              <span>Làm lại</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="section-block palette-section">
+          <div class="section-heading"><span>MÀU BÚT</span><span class="section-caption">03</span></div>
+          <div class="current-color-row">
+            <span class="current-color-swatch" id="currentColorSwatch" aria-hidden="true"></span>
+            <div class="current-color-copy"><span class="current-color-label">Màu đang chọn</span><span class="current-color-value" id="currentColorValue">#1F2937</span></div>
+            <label class="custom-color-button" for="customColor" title="Chọn màu tùy chỉnh" aria-label="Chọn màu tùy chỉnh">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18"/></svg>
+              <input id="customColor" type="color" value="#1f2937" aria-label="Chọn màu tùy chỉnh">
+            </label>
+          </div>
+          <div class="palette" role="group" aria-label="Bảng màu mặc định">
+            <button class="color-swatch selected" type="button" data-color="#1f2937" style="--swatch:#1f2937" aria-label="Màu than" aria-pressed="true"></button>
+            <button class="color-swatch" type="button" data-color="#ffffff" style="--swatch:#ffffff" aria-label="Màu trắng" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#ef4444" style="--swatch:#ef4444" aria-label="Màu đỏ" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#f97316" style="--swatch:#f97316" aria-label="Màu cam" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#f59e0b" style="--swatch:#f59e0b" aria-label="Màu vàng cam" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#eab308" style="--swatch:#eab308" aria-label="Màu vàng" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#22c55e" style="--swatch:#22c55e" aria-label="Màu xanh lá" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#14b8a6" style="--swatch:#14b8a6" aria-label="Màu xanh ngọc" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#06b6d4" style="--swatch:#06b6d4" aria-label="Màu cyan" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#3b82f6" style="--swatch:#3b82f6" aria-label="Màu xanh dương" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#8b5cf6" style="--swatch:#8b5cf6" aria-label="Màu tím" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#ec4899" style="--swatch:#ec4899" aria-label="Màu hồng" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#a16207" style="--swatch:#a16207" aria-label="Màu nâu" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#64748b" style="--swatch:#64748b" aria-label="Màu xám xanh" aria-pressed="false"></button>
+          </div>
+          <div class="eyedropper-note"><span class="note-icon">i</span><span>Chọn <b>Hút màu</b>, rồi nhấn vào nét đã vẽ để lấy màu.</span></div>
+        </section>
+
+        <section class="section-block size-section">
+          <div class="section-heading"><span>KÍCH THƯỚC</span><span class="section-caption">04</span></div>
+          <div class="range-block">
+            <div class="range-label-row"><label for="brushSize">Kích thước bút</label><output id="brushSizeValue" for="brushSize">6 px</output></div>
+            <input id="brushSize" class="range-input" type="range" min="1" max="40" value="6">
+            <div class="range-minmax"><span>Mảnh</span><span>Dày</span></div>
+          </div>
+          <div class="range-block">
+            <div class="range-label-row"><label for="eraserSize">Kích thước tẩy</label><output id="eraserSizeValue" for="eraserSize">24 px</output></div>
+            <input id="eraserSize" class="range-input" type="range" min="4" max="80" value="24">
+            <div class="range-minmax"><span>Nhỏ</span><span>Lớn</span></div>
+          </div>
+        </section>
+
+        <div class="sidebar-bottom">
+          <button id="clearButton" class="clear-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 13h11l1-13M9 7V4h6v3"/></svg>
+            <span>Xóa toàn bộ</span>
+          </button>
+        </div>
+      </aside>
+
+      <section class="board-panel" aria-label="Vùng vẽ">
+        <div class="board-header">
+          <div class="board-title">Bảng vẽ</div>
+        </div>
+        <div class="canvas-frame" id="canvasFrame" data-tool="brush">
+          <canvas id="drawingCanvas" aria-label="Canvas vẽ"></canvas>
+          <canvas id="previewCanvas" aria-label="Lớp hiển thị nét đang vẽ"></canvas>
+          <div class="canvas-empty-hint" id="emptyHint" aria-hidden="true">
+            <div class="empty-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M4 17.2 14.9 6.3l3.8 3.8L7.8 21H4v-3.8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m13.5 7.7 3.8 3.8" stroke="currentColor" stroke-width="1.5"/></svg></div>
+            <span>Bắt đầu vẽ ở đây</span>
+            <small>Chọn bút rồi nhấn giữ và kéo chuột</small>
+          </div>
+        </div>
+        <footer class="board-footer">
+          <div class="footer-left"><span class="keyboard-icon">⌘</span><span><b>B</b> Bút</span><span class="footer-bullet">·</span><span><b>E</b> Tẩy</span><span class="footer-bullet">·</span><span><b>I</b> Hút màu</span></div>
+        </footer>
+      </section>
+    </main>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
